@@ -522,6 +522,11 @@ class EncDecEvaluator(Evaluator):
             bleu = eval_moses_bleu(ref_path, hyp_path)
             logger.info("BLEU %s %s : %f" % (hyp_path, ref_path, bleu))
             scores['%s_%s-%s_mt_bleu' % (data_set, lang1, lang2)] = bleu
+        
+            # evaluate exact match score
+            em = eval_exact_match(ref_path, hyp_path)
+            logger.info("EM accuracy %s %s : %f" % (hyp_path, ref_path, em))
+            scores['%s_%s-%s_mt_em' % (data_set, lang1, lang2)] = em
 
 
 def convert_to_text(batch, lengths, dico, params):
@@ -563,3 +568,28 @@ def eval_moses_bleu(ref, hyp):
     else:
         logger.warning('Impossible to parse BLEU score! "%s"' % result)
         return -1
+    
+
+def eval_exact_match(ref, hyp):
+    """
+    Given a file of hypothesis and reference,
+    evaluate the exact match accuracy
+    """
+    assert os.path.isfile(ref) and os.path.isfile(hyp)
+
+    with open(hyp, 'r', encoding='utf-8') as pred, \
+        open(ref, 'r', encoding='utf-8') as gold:
+
+        pred_lines = pred.readlines()
+        gold_lines = gold.readlines()
+
+        correct = 0
+
+        assert len(pred_lines) == len(gold_lines), 'predicted sentence count does not match gold sentence count!'
+
+        for i, line in enumerate(pred_lines):
+            if line == gold_lines[i]:
+                correct += 1
+
+        return float(correct/len(pred_lines))
+

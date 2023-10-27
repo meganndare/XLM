@@ -8,6 +8,7 @@
 import json
 import random
 import argparse
+import wandb
 
 from xlm.slurm import init_signal_handler, init_distributed_mode
 from xlm.data.loader import check_data_params, load_data
@@ -24,6 +25,10 @@ def get_parser():
     """
     # parse parameters
     parser = argparse.ArgumentParser(description="Language transfer")
+
+    # WandB parameters
+    parser.add_argument("--proj_name", type=str, default="xlm-sem-parsing",
+                        help="WandB project name")
 
     # main parameters
     parser.add_argument("--dump_path", type=str, default="./dumped/",
@@ -214,6 +219,77 @@ def get_parser():
 
     return parser
 
+def init_wandb_exp(params):
+    wandb.init(
+        project=params.proj_name,
+        config={
+            "dump_path": params.dump_path,
+            "exp_name": params.exp_name,
+            "save_periodic": params.save_periodic,
+            "exp_id": params.exp_id,
+            "fp16": params.fp16,
+            "amp": params.amp,
+            "encoder_only": params.encoder_only,            
+            "emb_dim": params.emb_dim,
+            "n_layers": params.n_layers,
+            "n_heads": params.n_heads,
+            "dropout": params.dropout,
+            "attention_dropout": params.attention_dropout,
+            "gelu_activation": params.gelu_activation,
+            "share_inout_emb": params.share_inout_emb,
+            "sinusoidal_embeddings": params.sinusoidal_embeddings,
+            "use_lang_emb": params.use_lang_emb,
+            "use_memory": params.use_memory,
+            "asm": params.asm,
+            "context_size": params.context_size,
+            "word_pred": params.word_pred,
+            "sample_alpha": params.sample_alpha,
+            "word_mask_keep_rand": params.word_mask_keep_rand,
+            "word_shuffle": params.word_shuffle,
+            "word_dropout": params.word_dropout,
+            "word_blank": params.word_blank,
+            "data_path": params.data_path,
+            "lgs": params.lgs,
+            "max_vocab": params.max_vocab,
+            "min_count": params.min_count,
+            "lg_sampling_factor": params.lg_sampling_factor,
+            "bptt": params.bptt,
+            "max_len": params.max_len,
+            "group_by_size": params.group_by_size,
+            "batch_size": params.batch_size,
+            "max_batch_size": params.max_batch_size,
+            "tokens_per_batch": params.tokens_per_batch,
+            "split_data": params.split_data,
+            "optimizer": params.optimizer,
+            "clip_grad_norm": params.clip_grad_norm,
+            "epoch_size": params.epoch_size,
+            "max_epoch": params.max_epoch,
+            "stopping_criterion": params.stopping_criterion,
+            "validation_metrics": params.validation_metrics,
+            "accumulate_gradients": params.accumulate_gradients,
+            "lambda_mlm": params.lambda_mlm,
+            "lambda_clm": params.lambda_clm,
+            "lambda_pc": params.lambda_pc,
+            "lambda_ae": params.lambda_ae,
+            "lambda_mt": params.lambda_mt,
+            "lambda_bt": params.lambda_bt,
+            "mlm_steps": params.mlm_steps,
+            "clm_steps": params.clm_steps,
+            "pc_steps": params.pc_steps,
+            "ae_steps": params.ae_steps,
+            "mt_steps": params.mt_steps,
+            "bt_steps": params.bt_steps,
+            "reload_emb": params.reload_emb,
+            "reload_model": params.reload_model,
+            "reload_checkpoint": params.reload_checkpoint,
+            "beam_size": params.beam_size,
+            "length_penalty": params.length_penalty,
+            "early_stopping": params.early_stopping,
+            "eval_bleu": params.eval_bleu,
+            "eval_only": params.eval_only,
+        }
+    )
+
 
 def main(params):
 
@@ -250,6 +326,8 @@ def main(params):
             logger.info("%s -> %.6f" % (k, v))
         logger.info("__log__:%s" % json.dumps(scores))
         exit()
+    else:
+       init_wandb_exp(params) 
 
     # set sampling probabilities for training
     set_sampling_probs(data, params)
@@ -300,10 +378,15 @@ def main(params):
         if params.is_master:
             logger.info("__log__:%s" % json.dumps(scores))
 
+        # log to WandB
+        wandb.log(scores)
+
         # end of epoch
         trainer.save_best_model(scores)
         trainer.save_periodic()
         trainer.end_epoch(scores)
+    
+    wandb.finish()
 
 
 if __name__ == '__main__':
