@@ -899,7 +899,7 @@ class EncDecTrainer(Trainer):
             # encode source sentence and translate it
             enc1 = _encoder('fwd', x=x1, lengths=len1, langs=langs1, causal=False)
             enc1 = enc1.transpose(0, 1)
-            x2, len2 = _decoder.generate(enc1, len1, lang2_id, max_len=int(1.3 * len1.max().item() + 5))
+            x2, len2 = _decoder.generate(enc1, len1, lang2_id, max_len=int(min(1.3 * len1.max().item() + 5, params.max_len)))
             langs2 = x2.clone().fill_(lang2_id)
 
             # free CUDA memory

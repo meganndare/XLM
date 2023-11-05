@@ -122,6 +122,9 @@ def load_mono_data(params, data):
             if splt == 'train' and params.eval_only:
                 continue
 
+            if splt == 'gen' and params.proj_name == 'amr-xlm':
+                continue
+
             # load data / update dictionary parameters / update data
             mono_data = load_binarized(params.mono_dataset[lang][splt], params)
             set_dico_parameters(params, data, mono_data['dico'])
@@ -146,6 +149,10 @@ def load_mono_data(params, data):
                 # remove empty and too long sentences
                 if splt == 'train':
                     dataset.remove_empty_sentences()
+                    dataset.remove_long_sentences(params.max_len)
+                
+                if splt != 'train':
+                    dataset.tokens_per_batch = -1
                     dataset.remove_long_sentences(params.max_len)
 
                 # if there are several processes on the same machine, we can split the dataset
@@ -177,10 +184,14 @@ def load_para_data(params, data):
         assert (src, tgt) not in data['para']
         data['para'][(src, tgt)] = {}
 
-        for splt in ['train', 'valid', 'test', 'gen']:
+        for splt in ['train', 'valid', 'test']:
 
             # no need to load training data for evaluation
             if splt == 'train' and params.eval_only:
+                continue
+
+            # no need to load gen data for non-cogs
+            if splt == 'gen' and params.proj_name == 'amr-xlm':
                 continue
 
             # for back-translation, we can't load training data
@@ -211,6 +222,7 @@ def load_para_data(params, data):
             # for validation and test set, enumerate sentence per sentence
             if splt != 'train':
                 dataset.tokens_per_batch = -1
+                dataset.remove_long_sentences(params.max_len)
 
             # if there are several processes on the same machine, we can split the dataset
             if splt == 'train' and params.n_gpu_per_node > 1 and params.split_data:
@@ -303,7 +315,7 @@ def check_data_params(params):
         (src, tgt): {
             splt: (os.path.join(params.data_path, '%s.%s-%s.%s.pth' % (splt, src, tgt, src)),
                    os.path.join(params.data_path, '%s.%s-%s.%s.pth' % (splt, src, tgt, tgt)))
-            for splt in ['train', 'valid', 'test', 'gen']
+            for splt in ['train', 'valid', 'test']
             if splt != 'train' or (src, tgt) in required_para_train or (tgt, src) in required_para_train
         } for src in params.langs for tgt in params.langs
         if src < tgt and ((src, tgt) in required_para or (tgt, src) in required_para)

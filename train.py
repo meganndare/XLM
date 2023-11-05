@@ -202,6 +202,8 @@ def get_parser():
                         help="Evaluate BLEU score during MT training")
     parser.add_argument("--eval_only", type=bool_flag, default=False,
                         help="Only run evaluations")
+    parser.add_argument("--postprocess_while_training", type=bool_flag, default=True,
+                        help="Indicates whether to run AMR postprocessing scripts in the middle of training.")
 
     # debug
     parser.add_argument("--debug_train", type=bool_flag, default=False,
@@ -287,6 +289,7 @@ def init_wandb_exp(params):
             "early_stopping": params.early_stopping,
             "eval_bleu": params.eval_bleu,
             "eval_only": params.eval_only,
+            "postprocess_while_training": params.postprocess_while_training,
         }
     )
 

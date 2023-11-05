@@ -11,6 +11,9 @@ import subprocess
 from collections import OrderedDict
 import numpy as np
 import torch
+import time
+import shlex
+import re
 
 from ..utils import to_cuda, restore_segmentation, concat_batches
 from ..model.memory import HashingMemory
@@ -18,6 +21,13 @@ from ..model.memory import HashingMemory
 
 BLEU_SCRIPT_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'multi-bleu.perl')
 assert os.path.isfile(BLEU_SCRIPT_PATH)
+
+AMR_PROJ_ID = 'amr-xlm'
+AMR_POSTPROCESS_TRIES = 3
+AMR_POSTPROCESS_TIMEOUT = 600
+POSTPROCESSED_AMR_SUFFIX = '.restore.final'
+SMATCH = 'SMATCH'
+SMATCH_SUFFIX = '.SMATCH'
 
 
 logger = getLogger()
@@ -99,6 +109,8 @@ class Evaluator(object):
             subprocess.Popen('mkdir -p %s' % params.hyp_path, shell=True).wait()
             self.create_reference_files()
 
+
+
     def get_iterator(self, data_set, lang1, lang2=None, stream=False):
         """
         Create a new iterator for a dataset.
@@ -143,6 +155,7 @@ class Evaluator(object):
         for batch in iterator:
             yield batch if lang2 is None or lang1 < lang2 else batch[::-1]
 
+
     def create_reference_files(self):
         """
         Create reference files for BLEU evaluation.
@@ -186,6 +199,37 @@ class Evaluator(object):
                 # restore original segmentation
                 restore_segmentation(lang1_path)
                 restore_segmentation(lang2_path)
+
+                if params.proj_name == AMR_PROJ_ID and params.postprocess_while_training == True and params.eval_bleu == True:
+
+                    # store smatch data paths
+                    lang2_smatch_path = lang2_path + SMATCH_SUFFIX
+                    params.ref_paths[(lang1, lang2, data_set, SMATCH)] = lang2_smatch_path
+
+                    # postprocess AMRs
+                    self.postprocess_amr(lang2_path, lang1_path, AMR_POSTPROCESS_TIMEOUT, AMR_POSTPROCESS_TRIES)
+
+                    # produce format required by SMATCH script
+                    with open(lang2_path + POSTPROCESSED_AMR_SUFFIX, 'r', encoding='utf-8') as input, \
+                        open(lang2_smatch_path, 'w', encoding='utf-8') as output:
+                        in_lines = input.readlines()
+                        for line in in_lines:
+                            output.write(line + '\n')
+
+    
+    def postprocess_amr(self, hyp_path, rev_ref_path, timeout, retries):
+        for i in range(retries):
+            time.sleep(0.3)
+            completed_process = subprocess.run(shlex.split(f'/home/CE/mdare/code/meganndare/XLM/xlm/evaluation/postprocess_amr.sh {hyp_path} {rev_ref_path}'), timeout=timeout, capture_output=True)
+
+            if completed_process.returncode == 0:
+                return
+
+        if completed_process.returncode != 0:
+            logger.info(completed_process.stdout.splitlines())
+            logger.info(completed_process.stderr.splitlines())
+            raise RuntimeError(f'Tried {retries} times but couldn\'t properly postprocess AMR in {hyp_path}')
+
 
     def mask_out(self, x, lengths, rng):
         """
@@ -512,6 +556,7 @@ class EncDecEvaluator(Evaluator):
             hyp_name = 'hyp{0}.{1}-{2}.{3}.txt'.format(scores['epoch'], lang1, lang2, data_set)
             hyp_path = os.path.join(params.hyp_path, hyp_name)
             ref_path = params.ref_paths[(lang1, lang2, data_set)]
+            reverse_ref_path = params.ref_paths[(lang2, lang1, data_set)]
 
             # export sentences to hypothesis file / restore BPE segmentation
             with open(hyp_path, 'w', encoding='utf-8') as f:
@@ -527,6 +572,31 @@ class EncDecEvaluator(Evaluator):
             em = eval_exact_match(ref_path, hyp_path)
             logger.info("EM accuracy %s %s : %f" % (hyp_path, ref_path, em))
             scores['%s_%s-%s_mt_em' % (data_set, lang1, lang2)] = em
+
+            # optionally evaluate smatch for AMR
+            if params.proj_name == AMR_PROJ_ID and params.postprocess_while_training == True \
+                and lang1 == 'en' and lang2 == 'mr':
+                if data_set in ['valid', 'test']:
+                    #amr_ref_path = os.path.join(params.dump_path, data_set, f'ref-{lang1}-{lang2}')
+                    #amr_hyp_path = os.path.join(params.dump_path, data_set, f'hyp-{lang1}-{lang2}')
+                   
+                    # postprocess AMRs
+                    self.postprocess_amr(hyp_path, reverse_ref_path, AMR_POSTPROCESS_TIMEOUT, AMR_POSTPROCESS_TRIES)
+
+                    # produce format required by SMATCH script
+                    with open(hyp_path + POSTPROCESSED_AMR_SUFFIX, 'r', encoding='utf-8') as input, \
+                        open(hyp_path + SMATCH_SUFFIX, 'w', encoding='utf-8') as output:
+                        in_lines = input.readlines()
+                        for line in in_lines:
+                            output.write(line + '\n')
+
+                    p, r, f = eval_smatch(ref_path, hyp_path)
+
+                    logger.info("SMATCH %s %s : (p=%f, r=%f, f=%f)" % (hyp_path, ref_path, p, r, f))
+                    scores['%s_%s-%s_mt_smatch_p' % (data_set, lang1, lang2)] = p
+                    scores['%s_%s-%s_mt_smatch_r' % (data_set, lang1, lang2)] = r
+                    scores['%s_%s-%s_mt_smatch_f' % (data_set, lang1, lang2)] = f
+
 
 
 def convert_to_text(batch, lengths, dico, params):
@@ -592,4 +662,35 @@ def eval_exact_match(ref, hyp):
                 correct += 1
 
         return float(correct/len(pred_lines))
+    
+
+def eval_smatch(ref, hyp):
+    """
+    Given a parent directory of hypothesis and reference amrs,
+    evaluate the smatch score
+    """
+    p_scores = []
+    r_scores = []
+    f_scores = []
+
+    completed_process = subprocess.run(['/home/CE/mdare/code/smatch/smatch.py', '-f', f'{hyp}{SMATCH_SUFFIX}', f'{ref}{SMATCH_SUFFIX}', '--significant', '4', '--pr'], timeout=30, capture_output=True)
+
+    if completed_process.returncode == 0:
+        (p, r, f) = tuple(re.findall("\d+\.\d+", completed_process.stdout.decode("utf-8")))
+        p_scores.append(p)
+        r_scores.append(r)
+        f_scores.append(f)
+
+    p_scores = [float(i) for i in p_scores]
+    r_scores = [float(i) for i in r_scores]
+    f_scores = [float(i) for i in f_scores]
+
+    amr_total = None
+
+    with open(ref + POSTPROCESSED_AMR_SUFFIX, 'r', encoding='utf-8') as amrs:
+        amr_total = len(amrs.readlines())
+
+    logger.info(f'Determined total of AMRs in this batch: {amr_total}')
+
+    return sum(p_scores), sum(r_scores), sum(f_scores)
 
