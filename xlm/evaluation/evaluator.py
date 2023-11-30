@@ -207,6 +207,7 @@ class Evaluator(object):
                     params.ref_paths[(lang1, lang2, data_set, SMATCH)] = lang2_smatch_path
 
                     # postprocess AMRs
+                    logger.info(f'creating reference file for {data_set}: {lang1}, {lang2}')
                     self.postprocess_amr(lang2_path, lang1_path, AMR_POSTPROCESS_TIMEOUT, AMR_POSTPROCESS_TRIES)
 
                     # produce format required by SMATCH script

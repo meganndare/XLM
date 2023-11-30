@@ -2,16 +2,16 @@
 AMR_PATH=$1
 SENT_PATH=$2
 set -e -o pipefail
-
 # postprocess var free amr so smatch can be calculated
 postprocess_amr(){
-	python3 /home/CE/mdare/code/AMR/postprocess_AMRs.py -f $AMR_PATH -s $SENT_PATH --force --threads 5
+	python3 /home/CE/mdare/code/AMR/postprocess_AMRs.py -f $AMR_PATH -s $SENT_PATH --force --no_wiki --threads 10
     rm ${AMR_PATH}.restore
     rm ${AMR_PATH}.restore.pruned
     rm ${AMR_PATH}.restore.coref
-    rm ${AMR_PATH}.restore.wiki
-    rm ${AMR_PATH}.restore.pruned.wiki
-    rm ${AMR_PATH}.restore.pruned.wiki.coref.all
+    rm ${AMR_PATH}.restore.pruned.coref.all
+    #rm ${AMR_PATH}.restore.wiki
+    #rm ${AMR_PATH}.restore.pruned.wiki
+    #rm ${AMR_PATH}.restore.pruned.wiki.coref.all
 }
 
 # Run tests here
